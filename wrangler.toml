@@ -1,0 +1,9 @@
+name = "lindy-pong-worker"
+main = "src/index.ts"
+compatibility_date = "2024-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "ping-pong-db"
+database_id = "48dd9152-99f1-4290-a646-f0e0ad520223"
