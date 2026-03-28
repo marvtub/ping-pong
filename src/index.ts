@@ -18,7 +18,24 @@ function layout(content: string) {
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>🏓 Lindy Pong</title>
   <style>
-    :root {
+    :root, [data-theme="light"] {
+      --bg: #f5f5f5;
+      --surface: #ffffff;
+      --surface2: #f0f0f0;
+      --border: #e0e0e0;
+      --text: #1a1a1a;
+      --muted: #666;
+      --accent: #2563eb;
+      --accent-hover: #1d4ed8;
+      --green: #16a34a;
+      --red: #dc2626;
+      --gold: #d97706;
+      --silver: #64748b;
+      --bronze: #b45309;
+      --radius: 12px;
+      --shadow: rgba(0,0,0,0.06);
+    }
+    [data-theme="dark"] {
       --bg: #0f0f0f;
       --surface: #1a1a1a;
       --surface2: #242424;
@@ -32,7 +49,7 @@ function layout(content: string) {
       --gold: #f59e0b;
       --silver: #94a3b8;
       --bronze: #d97706;
-      --radius: 12px;
+      --shadow: rgba(0,0,0,0.3);
     }
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
@@ -47,6 +64,7 @@ function layout(content: string) {
     .card {
       background: var(--surface); border: 1px solid var(--border);
       border-radius: var(--radius); overflow: hidden; margin-bottom: 16px;
+      box-shadow: 0 1px 3px var(--shadow);
     }
     .card-header {
       padding: 12px 16px; font-size: 0.75rem; font-weight: 600;
@@ -118,11 +136,31 @@ function layout(content: string) {
     .toggle-section.show { display: block; }
     .toggle-link { color: var(--accent); cursor: pointer; font-size: 0.8rem; font-weight: 500; text-decoration: none; }
     .toggle-link:hover { text-decoration: underline; }
+    .theme-toggle {
+      position: fixed; top: 16px; right: 16px; z-index: 100;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 20px; padding: 6px 12px; cursor: pointer;
+      font-size: 1.1rem; line-height: 1; box-shadow: 0 2px 8px var(--shadow);
+      transition: all 0.2s;
+    }
+    .theme-toggle:hover { border-color: var(--accent); }
     .empty { text-align: center; padding: 24px 16px; color: var(--muted); font-size: 0.9rem; }
     .flash { padding: 10px 16px; font-size: 0.85rem; border-radius: 8px; margin-bottom: 12px; }
     .flash-error { background: #2d1515; border: 1px solid #5c2020; color: var(--red); }
   </style>
   <script>
+    // Theme
+    (function() {
+      const saved = localStorage.getItem('theme') || 'light';
+      document.documentElement.setAttribute('data-theme', saved);
+    })();
+    function toggleTheme() {
+      const current = document.documentElement.getAttribute('data-theme');
+      const next = current === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', next);
+      localStorage.setItem('theme', next);
+      document.getElementById('theme-icon').textContent = next === 'dark' ? '☀️' : '🌙';
+    }
     function toggleSection(id) {
       const el = document.getElementById(id);
       el.classList.toggle('show');
@@ -136,6 +174,8 @@ function layout(content: string) {
   </script>
 </head>
 <body>
+  <button class="theme-toggle" onclick="toggleTheme()"><span id="theme-icon">🌙</span></button>
+  <script>document.getElementById('theme-icon').textContent = (localStorage.getItem('theme') || 'light') === 'dark' ? '☀️' : '🌙';</script>
   <div class="container">
     <header>
       <h1>🏓 Lindy Pong</h1>
