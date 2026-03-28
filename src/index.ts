@@ -120,24 +120,39 @@ function layout(content: string) {
     tr:last-child td { border-bottom: none; }
     .rank-cell { font-size: 1.1rem; text-align: center; width: 40px; }
     .name-cell { font-weight: 600; }
+    .name-link { color: var(--text); text-decoration: none; }
+    .name-link:hover { color: var(--accent); text-decoration: underline; }
     .record-cell { color: var(--muted); font-size: 0.85rem; }
     .winrate-cell { font-weight: 600; text-align: right; }
     .winrate-high { color: var(--green); }
     .winrate-mid { color: var(--gold); }
     .winrate-low { color: var(--red); }
     .unranked { opacity: 0.5; }
-    .match-row { display: flex; align-items: center; padding: 10px 16px; border-top: 1px solid var(--border); gap: 8px; }
+    .match-row { padding: 12px 16px; border-top: 1px solid var(--border); cursor: pointer; transition: background 0.15s; }
     .match-row:first-child { border-top: none; }
-    .match-result { flex: 1; font-size: 0.9rem; }
-    .match-winner { font-weight: 600; color: var(--green); }
+    .match-row:hover { background: var(--surface2); }
+    .match-row-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+    .match-result { flex: 1; font-size: 0.9rem; line-height: 1.4; }
+    .match-winner { font-weight: 600; }
     .match-vs { color: var(--muted); margin: 0 4px; font-size: 0.8rem; }
-    .match-loser { color: var(--red); }
-    .match-score { color: var(--accent); font-weight: 600; font-size: 0.8rem; margin-left: 6px; }
-    .match-meta { display: flex; align-items: center; gap: 8px; }
-    .match-date { color: var(--muted); font-size: 0.7rem; white-space: nowrap; }
+    .match-loser { font-weight: 600; }
+    .match-score { font-weight: 600; }
+    .match-time { color: var(--muted); font-size: 0.75rem; white-space: nowrap; }
+    .match-elo { font-size: 0.75rem; color: var(--muted); }
     .delete-form { display: inline; }
-    .delete-btn { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 0.8rem; padding: 4px; line-height: 1; }
-    .delete-btn:hover { color: var(--red); }
+    .delete-btn { background: var(--red); border: none; color: #fff; cursor: pointer; font-size: 0.9rem; padding: 10px 16px; border-radius: 8px; font-weight: 600; width: 100%; font-family: inherit; }
+    .delete-btn:hover { opacity: 0.9; }
+    .delete-btn:active { transform: scale(0.98); }
+    .match-detail-content { text-align: center; }
+    .match-detail-players { font-size: 1.3rem; margin-bottom: 16px; line-height: 1.6; }
+    .match-detail-score { font-size: 2rem; font-weight: 700; margin-bottom: 16px; color: var(--accent); }
+    .match-detail-elo { display: flex; justify-content: space-around; margin-bottom: 20px; padding: 16px 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+    .match-detail-elo-item { display: flex; flex-direction: column; align-items: center; }
+    .match-detail-elo-label { font-size: 0.75rem; color: var(--muted); margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.05em; }
+    .match-detail-elo-value { font-size: 1.2rem; font-weight: 700; }
+    .match-detail-elo-value.positive { color: var(--green); }
+    .match-detail-elo-value.negative { color: var(--red); }
+    .match-detail-date { color: var(--muted); font-size: 0.85rem; margin-bottom: 20px; }
     .toggle-section { display: none; }
     .toggle-section.show { display: block; }
     .toggle-link { color: var(--accent); cursor: pointer; font-size: 0.8rem; font-weight: 500; text-decoration: none; }
@@ -187,6 +202,14 @@ function layout(content: string) {
     .empty { text-align: center; padding: 24px 16px; color: var(--muted); font-size: 0.9rem; }
     .flash { padding: 10px 16px; font-size: 0.85rem; border-radius: 8px; margin-bottom: 12px; }
     .flash-error { background: #2d1515; border: 1px solid #5c2020; color: var(--red); }
+    .back-link { display: inline-flex; align-items: center; color: var(--accent); text-decoration: none; font-size: 0.9rem; margin-bottom: 16px; font-weight: 500; }
+    .back-link:hover { text-decoration: underline; }
+    .profile-header { text-align: center; padding: 24px 0; }
+    .profile-name { font-size: 1.8rem; font-weight: 700; margin-bottom: 8px; }
+    .profile-elo { font-size: 1.2rem; color: var(--accent); font-weight: 600; margin-bottom: 4px; }
+    .profile-record { color: var(--muted); font-size: 0.9rem; }
+    .chart-container { padding: 20px; }
+    .chart-title { font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin-bottom: 12px; }
   </style>
   <script>
     // Theme
@@ -211,15 +234,32 @@ function layout(content: string) {
       if (ws) ws.value = w;
       if (ls) ls.value = l;
     }
-    function openModal() {
-      document.getElementById('match-modal').classList.add('show');
+    function openModal(id) {
+      id = id || 'match-modal';
+      document.getElementById(id).classList.add('show');
       document.body.style.overflow = 'hidden';
     }
-    function closeModal() {
-      document.getElementById('match-modal').classList.remove('show');
+    function closeModal(id) {
+      id = id || 'match-modal';
+      document.getElementById(id).classList.remove('show');
       document.body.style.overflow = '';
     }
-    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal(); });
+    function timeAgo(timestamp) {
+      const now = Math.floor(Date.now() / 1000);
+      const diff = now - timestamp;
+      if (diff < 60) return 'just now';
+      if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
+      if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
+      if (diff < 604800) return Math.floor(diff / 86400) + 'd ago';
+      const d = new Date(timestamp * 1000);
+      return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    }
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        closeModal('match-modal');
+        closeModal('match-detail-modal');
+      }
+    });
   </script>
 </head>
 <body>
@@ -288,7 +328,7 @@ app.get('/', async (c) => {
       const medal = rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : `${rank}`
       lbRows += `<tr>
         <td class="rank-cell">${medal}</td>
-        <td class="name-cell">${p.name}</td>
+        <td class="name-cell"><a href="/players/${p.id}" class="name-link">${p.name}</a></td>
         <td class="record-cell">${p.wins}W ${p.losses}L</td>
         <td class="winrate-cell" style="font-weight:700">${Math.round(elo)}</td>
         <td class="winrate-cell" style="color:var(--muted);font-size:0.8rem">${wr?.toFixed(0)}%</td>
@@ -296,7 +336,7 @@ app.get('/', async (c) => {
     } else {
       lbRows += `<tr class="unranked">
         <td class="rank-cell">–</td>
-        <td class="name-cell">${p.name}</td>
+        <td class="name-cell"><a href="/players/${p.id}" class="name-link">${p.name}</a></td>
         <td class="record-cell">${p.wins}W ${p.losses}L</td>
         <td class="winrate-cell" style="color:var(--muted)">${Math.round(elo)}</td>
         <td class="winrate-cell" style="color:var(--muted);font-size:0.8rem">${games > 0 ? wr?.toFixed(0) + '%' : '—'}</td>
@@ -307,42 +347,84 @@ app.get('/', async (c) => {
   // Match history
   let matchRows = ''
   for (const m of (matches.results || []) as any[]) {
-    const d = new Date((m.created_at as number) * 1000)
-    const dateStr = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-    const timeStr = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
     const scoreStr = (m.winner_score != null && m.loser_score != null)
-      ? `<span class="match-score">${m.winner_score}–${m.loser_score}</span>` : ''
+      ? ` ${m.winner_score}–${m.loser_score}` : ''
 
     const winnerEloChange = m.winner_elo_change as number | null
     const loserEloChange = m.loser_elo_change as number | null
     const eloStr = (winnerEloChange != null && loserEloChange != null)
-      ? `<span class="match-score" style="font-size:0.75rem;margin-left:6px;color:var(--muted)">(${winnerEloChange > 0 ? '+' : ''}${winnerEloChange} / ${loserEloChange > 0 ? '+' : ''}${loserEloChange})</span>`
+      ? `<div class="match-elo">${winnerEloChange > 0 ? '+' : ''}${winnerEloChange} / ${loserEloChange > 0 ? '+' : ''}${loserEloChange}</div>`
       : ''
 
-    matchRows += `<div class="match-row">
-      <div class="match-result">
-        <span class="match-winner">${m.winner_name}</span>
-        <span class="match-vs">beat</span>
-        <span class="match-loser">${m.loser_name}</span>
-        ${scoreStr}${eloStr}
+    matchRows += `<div class="match-row" onclick="openModal('match-detail-${m.id}')">
+      <div class="match-row-top">
+        <div class="match-result">
+          <span class="match-winner">${m.winner_name}</span>
+          <span class="match-vs">beat</span>
+          <span class="match-loser">${m.loser_name}</span>
+          <span class="match-score">${scoreStr}</span>
+        </div>
+        <span class="match-time"><script>document.write(timeAgo(${m.created_at}))</script></span>
       </div>
-      <div class="match-meta">
-        <span class="match-date">${dateStr} ${timeStr}</span>
-        <form method="POST" action="/matches/${m.id}/delete" class="delete-form">
-          <button type="submit" class="delete-btn" title="Delete">✕</button>
-        </form>
+      ${eloStr}
+    </div>`
+  }
+
+  // Match detail modals
+  let matchModals = ''
+  for (const m of (matches.results || []) as any[]) {
+    const d = new Date((m.created_at as number) * 1000)
+    const dateStr = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+    const timeStr = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+    const scoreDisplay = (m.winner_score != null && m.loser_score != null)
+      ? `<div class="match-detail-score">${m.winner_score} – ${m.loser_score}</div>` : ''
+
+    const winnerEloChange = m.winner_elo_change as number | null
+    const loserEloChange = m.loser_elo_change as number | null
+
+    matchModals += `
+    <div id="match-detail-${m.id}" class="modal-overlay" onclick="if(event.target===this)closeModal('match-detail-${m.id}')">
+      <div class="modal">
+        <div class="modal-header">
+          <h2>Match Details</h2>
+          <button class="modal-close" onclick="closeModal('match-detail-${m.id}')">×</button>
+        </div>
+        <div class="match-detail-content">
+          <div class="match-detail-players">
+            <div style="font-weight:700;color:var(--green);margin-bottom:4px">${m.winner_name}</div>
+            <div style="color:var(--muted);font-size:0.9rem;margin-bottom:4px">beat</div>
+            <div style="font-weight:700;color:var(--red)">${m.loser_name}</div>
+          </div>
+          ${scoreDisplay}
+          ${winnerEloChange != null && loserEloChange != null ? `
+          <div class="match-detail-elo">
+            <div class="match-detail-elo-item">
+              <div class="match-detail-elo-label">${m.winner_name}</div>
+              <div class="match-detail-elo-value positive">${winnerEloChange > 0 ? '+' : ''}${winnerEloChange}</div>
+            </div>
+            <div class="match-detail-elo-item">
+              <div class="match-detail-elo-label">${m.loser_name}</div>
+              <div class="match-detail-elo-value negative">${loserEloChange > 0 ? '+' : ''}${loserEloChange}</div>
+            </div>
+          </div>
+          ` : ''}
+          <div class="match-detail-date">${dateStr} at ${timeStr}</div>
+          <form method="POST" action="/matches/${m.id}/delete">
+            <button type="submit" class="delete-btn">Delete Match</button>
+          </form>
+        </div>
       </div>
     </div>`
   }
 
   const content = `
     <!-- FAB + Modal for Record Match -->
-    <button class="fab" onclick="openModal()" title="Record Match">+</button>
-    <div id="match-modal" class="modal-overlay" onclick="if(event.target===this)closeModal()">
+    <button class="fab" onclick="openModal('match-modal')" title="Record Match">+</button>
+    <div id="match-modal" class="modal-overlay" onclick="if(event.target===this)closeModal('match-modal')">
       <div class="modal">
         <div class="modal-header">
           <h2>🎮 Record Match</h2>
-          <button class="modal-close" onclick="closeModal()">×</button>
+          <button class="modal-close" onclick="closeModal('match-modal')">×</button>
         </div>
         ${(players.results || []).length < 2
           ? '<p class="empty">Add at least 2 players first.</p>'
@@ -375,6 +457,9 @@ app.get('/', async (c) => {
         }
       </div>
     </div>
+
+    <!-- Match Detail Modals -->
+    ${matchModals}
 
     <!-- Leaderboard -->
     <div class="card">
@@ -507,6 +592,150 @@ app.post('/matches/:id/delete', async (c) => {
     await c.env.DB.prepare('DELETE FROM matches WHERE id = ?').bind(id).run()
   } catch (e) { console.error('Delete match error:', e) }
   return c.redirect('/')
+})
+
+app.get('/players/:id', async (c) => {
+  const playerId = c.req.param('id')
+  const db = c.env.DB
+
+  // Get player info
+  const player = await db.prepare('SELECT * FROM players WHERE id = ?').bind(playerId).first()
+  if (!player) return c.redirect('/')
+
+  // Get player stats
+  const stats = await db.prepare(`
+    SELECT
+      COUNT(DISTINCT CASE WHEN m.winner_id = ? THEN m.id END) as wins,
+      COUNT(DISTINCT CASE WHEN m.loser_id = ? THEN m.id END) as losses
+    FROM matches m
+    WHERE m.winner_id = ? OR m.loser_id = ?
+  `).bind(playerId, playerId, playerId, playerId).first()
+
+  const wins = (stats?.wins as number) || 0
+  const losses = (stats?.losses as number) || 0
+  const totalGames = wins + losses
+  const winRate = totalGames > 0 ? ((wins / totalGames) * 100).toFixed(1) : '0.0'
+
+  // Get all matches for this player ordered by date
+  const matches = await db.prepare(`
+    SELECT m.id, m.created_at, m.winner_score, m.loser_score,
+      m.winner_elo_change, m.loser_elo_change, m.winner_id, m.loser_id,
+      w.name as winner_name, l.name as loser_name
+    FROM matches m
+    JOIN players w ON m.winner_id = w.id
+    JOIN players l ON m.loser_id = l.id
+    WHERE m.winner_id = ? OR m.loser_id = ?
+    ORDER BY m.created_at ASC
+  `).bind(playerId, playerId).all()
+
+  // Build Elo history
+  const eloHistory: Array<{timestamp: number, elo: number}> = [{timestamp: 0, elo: 1000}]
+  let currentElo = 1000
+
+  for (const m of (matches.results || []) as any[]) {
+    const isWinner = m.winner_id === playerId
+    const eloChange = isWinner
+      ? (m.winner_elo_change as number)
+      : (m.loser_elo_change as number)
+
+    currentElo += eloChange
+    eloHistory.push({
+      timestamp: m.created_at as number,
+      elo: currentElo
+    })
+  }
+
+  // Generate SVG chart
+  let chartSvg = ''
+  if (eloHistory.length > 1) {
+    const width = 440
+    const height = 120
+    const padding = 10
+    const chartWidth = width - padding * 2
+    const chartHeight = height - padding * 2
+
+    const minElo = Math.min(...eloHistory.map(h => h.elo), 1000) - 50
+    const maxElo = Math.max(...eloHistory.map(h => h.elo), 1000) + 50
+    const eloRange = maxElo - minElo
+
+    const points = eloHistory.map((h, i) => {
+      const x = padding + (i / (eloHistory.length - 1)) * chartWidth
+      const y = padding + chartHeight - ((h.elo - minElo) / eloRange) * chartHeight
+      return `${x},${y}`
+    }).join(' ')
+
+    const baselineY = padding + chartHeight - ((1000 - minElo) / eloRange) * chartHeight
+
+    chartSvg = `
+    <svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" style="max-width:100%;height:auto">
+      <line x1="${padding}" y1="${baselineY}" x2="${width - padding}" y2="${baselineY}"
+            stroke="var(--muted)" stroke-width="1" stroke-dasharray="4,4" opacity="0.5"/>
+      <polyline points="${points}" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linejoin="round"/>
+      ${eloHistory.map((h, i) => {
+        const x = padding + (i / (eloHistory.length - 1)) * chartWidth
+        const y = padding + chartHeight - ((h.elo - minElo) / eloRange) * chartHeight
+        return `<circle cx="${x}" cy="${y}" r="3" fill="var(--accent)"/>`
+      }).join('')}
+    </svg>`
+  }
+
+  // Recent matches display (reversed for newest first)
+  let matchRows = ''
+  const recentMatches = [...(matches.results || [])].reverse().slice(0, 20)
+  for (const m of recentMatches as any[]) {
+    const isWinner = m.winner_id === playerId
+    const scoreStr = (m.winner_score != null && m.loser_score != null)
+      ? ` ${m.winner_score}–${m.loser_score}` : ''
+
+    const eloChange = isWinner
+      ? (m.winner_elo_change as number)
+      : (m.loser_elo_change as number)
+    const eloStr = eloChange != null
+      ? `<div class="match-elo">${eloChange > 0 ? '+' : ''}${eloChange}</div>`
+      : ''
+
+    const opponentName = isWinner ? m.loser_name : m.winner_name
+    const resultText = isWinner ? 'beat' : 'lost to'
+    const resultClass = isWinner ? 'match-winner' : 'match-loser'
+
+    matchRows += `<div class="match-row" style="cursor:default">
+      <div class="match-row-top">
+        <div class="match-result">
+          <span class="${resultClass}">${resultText}</span>
+          <span style="font-weight:600;margin-left:4px">${opponentName}</span>
+          <span class="match-score">${scoreStr}</span>
+        </div>
+        <span class="match-time"><script>document.write(timeAgo(${m.created_at}))</script></span>
+      </div>
+      ${eloStr}
+    </div>`
+  }
+
+  const content = `
+    <a href="/" class="back-link">← Back to Leaderboard</a>
+
+    <div class="profile-header">
+      <div class="profile-name">${player.name}</div>
+      <div class="profile-elo">${Math.round((player.elo_rating as number) || 1000)} Elo</div>
+      <div class="profile-record">${wins}W - ${losses}L (${winRate}%)</div>
+    </div>
+
+    ${eloHistory.length > 1 ? `
+    <div class="card">
+      <div class="chart-container">
+        <div class="chart-title">📈 Elo History</div>
+        ${chartSvg}
+      </div>
+    </div>
+    ` : ''}
+
+    <div class="card">
+      <div class="card-header">📜 Match History</div>
+      ${matchRows || '<p class="empty">No matches yet</p>'}
+    </div>
+  `
+
+  return c.html(layout(content))
 })
 
 export default app
