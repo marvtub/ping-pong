@@ -150,6 +150,40 @@ function layout(content: string) {
       transition: all 0.2s;
     }
     .theme-toggle:hover { border-color: var(--accent); }
+    .fab {
+      position: fixed; bottom: 24px; right: 24px; z-index: 100;
+      width: 56px; height: 56px; border-radius: 50%;
+      background: var(--accent); color: #fff; border: none;
+      font-size: 1.8rem; cursor: pointer; display: flex;
+      align-items: center; justify-content: center;
+      box-shadow: 0 4px 16px rgba(59,130,246,0.4);
+      transition: all 0.2s;
+    }
+    .fab:hover { transform: scale(1.08); background: var(--accent-hover); }
+    .fab:active { transform: scale(0.95); }
+    .modal-overlay {
+      position: fixed; inset: 0; background: rgba(0,0,0,0.6);
+      z-index: 200; display: none; align-items: flex-end; justify-content: center;
+      backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
+    }
+    .modal-overlay.show { display: flex; }
+    .modal {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 16px 16px 0 0; width: 100%; max-width: 480px;
+      padding: 24px 20px; padding-bottom: max(24px, env(safe-area-inset-bottom));
+      animation: slideUp 0.25s ease-out;
+    }
+    @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+    .modal-header {
+      display: flex; justify-content: space-between; align-items: center;
+      margin-bottom: 20px;
+    }
+    .modal-header h2 { font-size: 1.1rem; font-weight: 700; }
+    .modal-close {
+      background: none; border: none; color: var(--muted); font-size: 1.5rem;
+      cursor: pointer; padding: 4px; width: auto; line-height: 1;
+    }
+    .modal-close:hover { color: var(--text); }
     .empty { text-align: center; padding: 24px 16px; color: var(--muted); font-size: 0.9rem; }
     .flash { padding: 10px 16px; font-size: 0.85rem; border-radius: 8px; margin-bottom: 12px; }
     .flash-error { background: #2d1515; border: 1px solid #5c2020; color: var(--red); }
@@ -177,6 +211,15 @@ function layout(content: string) {
       if (ws) ws.value = w;
       if (ls) ls.value = l;
     }
+    function openModal() {
+      document.getElementById('match-modal').classList.add('show');
+      document.body.style.overflow = 'hidden';
+    }
+    function closeModal() {
+      document.getElementById('match-modal').classList.remove('show');
+      document.body.style.overflow = '';
+    }
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal(); });
   </script>
 </head>
 <body>
@@ -293,12 +336,16 @@ app.get('/', async (c) => {
   }
 
   const content = `
-    <!-- Record Match — front and center -->
-    <div class="card">
-      <div class="card-header">🎮 Record Match</div>
-      <div class="card-body">
+    <!-- FAB + Modal for Record Match -->
+    <button class="fab" onclick="openModal()" title="Record Match">+</button>
+    <div id="match-modal" class="modal-overlay" onclick="if(event.target===this)closeModal()">
+      <div class="modal">
+        <div class="modal-header">
+          <h2>🎮 Record Match</h2>
+          <button class="modal-close" onclick="closeModal()">×</button>
+        </div>
         ${(players.results || []).length < 2
-          ? '<p class="empty">Add at least 2 players to record matches.</p>'
+          ? '<p class="empty">Add at least 2 players first.</p>'
           : `<form method="POST" action="/matches">
               <div class="form-row">
                 <div>
