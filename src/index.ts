@@ -10,6 +10,12 @@ function generateId(): string {
   return crypto.randomUUID()
 }
 
+function calculateEloChange(playerRating: number, opponentRating: number, actualScore: number): number {
+  const K = 32
+  const expectedScore = 1 / (1 + Math.pow(10, (opponentRating - playerRating) / 400))
+  return Math.round(K * (actualScore - expectedScore))
+}
+
 function layout(content: string) {
   return `<!DOCTYPE html>
 <html lang="en">
@@ -193,7 +199,7 @@ app.get('/', async (c) => {
   const players = await db.prepare('SELECT * FROM players ORDER BY name').all()
 
   const leaderboard = await db.prepare(`
-    SELECT p.id, p.name,
+    SELECT p.id, p.name, p.elo_rating,
       COUNT(DISTINCT CASE WHEN m.winner_id = p.id THEN m.id END) as wins,
       COUNT(DISTINCT CASE WHEN m.loser_id = p.id THEN m.id END) as losses,
       (COUNT(DISTINCT CASE WHEN m.winner_id = p.id THEN m.id END) +
@@ -203,15 +209,16 @@ app.get('/', async (c) => {
                 COUNT(DISTINCT CASE WHEN m.loser_id = p.id THEN m.id END)), 0) as win_rate
     FROM players p
     LEFT JOIN matches m ON m.winner_id = p.id OR m.loser_id = p.id
-    GROUP BY p.id, p.name
+    GROUP BY p.id, p.name, p.elo_rating
     ORDER BY
       CASE WHEN (COUNT(DISTINCT CASE WHEN m.winner_id = p.id THEN m.id END) +
                  COUNT(DISTINCT CASE WHEN m.loser_id = p.id THEN m.id END)) >= 3 THEN 0 ELSE 1 END,
-      win_rate DESC, wins DESC
+      p.elo_rating DESC
   `).all()
 
   const matches = await db.prepare(`
     SELECT m.id, m.created_at, m.winner_score, m.loser_score,
+      m.winner_elo_change, m.loser_elo_change,
       w.name as winner_name, l.name as loser_name
     FROM matches m
     JOIN players w ON m.winner_id = w.id
@@ -230,24 +237,26 @@ app.get('/', async (c) => {
   for (const p of (leaderboard.results || []) as any[]) {
     const games = p.total_games as number
     const wr = p.win_rate as number | null
+    const elo = (p.elo_rating as number) || 1000
     const ranked = games >= 3
 
     if (ranked) {
       rank++
       const medal = rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : `${rank}`
-      const wrClass = (wr || 0) >= 60 ? 'winrate-high' : (wr || 0) >= 40 ? 'winrate-mid' : 'winrate-low'
       lbRows += `<tr>
         <td class="rank-cell">${medal}</td>
         <td class="name-cell">${p.name}</td>
         <td class="record-cell">${p.wins}W ${p.losses}L</td>
-        <td class="winrate-cell ${wrClass}">${wr?.toFixed(0)}%</td>
+        <td class="winrate-cell" style="font-weight:700">${Math.round(elo)}</td>
+        <td class="winrate-cell" style="color:var(--muted);font-size:0.8rem">${wr?.toFixed(0)}%</td>
       </tr>`
     } else {
       lbRows += `<tr class="unranked">
         <td class="rank-cell">–</td>
         <td class="name-cell">${p.name}</td>
         <td class="record-cell">${p.wins}W ${p.losses}L</td>
-        <td class="winrate-cell" style="color:var(--muted)">${games > 0 ? wr?.toFixed(0) + '%' : '—'}</td>
+        <td class="winrate-cell" style="color:var(--muted)">${Math.round(elo)}</td>
+        <td class="winrate-cell" style="color:var(--muted);font-size:0.8rem">${games > 0 ? wr?.toFixed(0) + '%' : '—'}</td>
       </tr>`
     }
   }
@@ -260,12 +269,19 @@ app.get('/', async (c) => {
     const timeStr = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
     const scoreStr = (m.winner_score != null && m.loser_score != null)
       ? `<span class="match-score">${m.winner_score}–${m.loser_score}</span>` : ''
+
+    const winnerEloChange = m.winner_elo_change as number | null
+    const loserEloChange = m.loser_elo_change as number | null
+    const eloStr = (winnerEloChange != null && loserEloChange != null)
+      ? `<span class="match-score" style="font-size:0.75rem;margin-left:6px;color:var(--muted)">(${winnerEloChange > 0 ? '+' : ''}${winnerEloChange} / ${loserEloChange > 0 ? '+' : ''}${loserEloChange})</span>`
+      : ''
+
     matchRows += `<div class="match-row">
       <div class="match-result">
         <span class="match-winner">${m.winner_name}</span>
         <span class="match-vs">beat</span>
         <span class="match-loser">${m.loser_name}</span>
-        ${scoreStr}
+        ${scoreStr}${eloStr}
       </div>
       <div class="match-meta">
         <span class="match-date">${dateStr} ${timeStr}</span>
@@ -317,7 +333,7 @@ app.get('/', async (c) => {
     <div class="card">
       <div class="card-header">🏆 Leaderboard</div>
       ${lbRows
-        ? `<table><thead><tr><th style="width:40px;text-align:center">#</th><th>Player</th><th>Record</th><th style="text-align:right">Win%</th></tr></thead><tbody>${lbRows}</tbody></table>`
+        ? `<table><thead><tr><th style="width:40px;text-align:center">#</th><th>Player</th><th>Record</th><th style="text-align:right">Elo</th><th style="text-align:right">Win%</th></tr></thead><tbody>${lbRows}</tbody></table>`
         : '<p class="empty">No players yet</p>'
       }
     </div>
@@ -365,7 +381,7 @@ app.post('/players', async (c) => {
   if (!name) return c.redirect('/')
 
   try {
-    await c.env.DB.prepare('INSERT INTO players (id, name, created_at) VALUES (?, ?, unixepoch())')
+    await c.env.DB.prepare('INSERT INTO players (id, name, elo_rating, created_at) VALUES (?, ?, 1000, unixepoch())')
       .bind(generateId(), name).run()
   } catch (e) { console.error('Add player error:', e) }
 
@@ -395,9 +411,27 @@ app.post('/matches', async (c) => {
   if (!winnerId || !loserId || winnerId === loserId) return c.redirect('/')
 
   try {
+    // Get current Elo ratings
+    const winner = await c.env.DB.prepare('SELECT elo_rating FROM players WHERE id = ?').bind(winnerId).first()
+    const loser = await c.env.DB.prepare('SELECT elo_rating FROM players WHERE id = ?').bind(loserId).first()
+
+    const winnerRating = (winner?.elo_rating as number) || 1000
+    const loserRating = (loser?.elo_rating as number) || 1000
+
+    // Calculate Elo changes
+    const winnerEloChange = calculateEloChange(winnerRating, loserRating, 1)
+    const loserEloChange = calculateEloChange(loserRating, winnerRating, 0)
+
+    // Update player ratings
+    await c.env.DB.prepare('UPDATE players SET elo_rating = ? WHERE id = ?')
+      .bind(winnerRating + winnerEloChange, winnerId).run()
+    await c.env.DB.prepare('UPDATE players SET elo_rating = ? WHERE id = ?')
+      .bind(loserRating + loserEloChange, loserId).run()
+
+    // Insert match with Elo changes
     await c.env.DB.prepare(
-      'INSERT INTO matches (id, winner_id, loser_id, winner_score, loser_score, created_at) VALUES (?, ?, ?, ?, ?, unixepoch())'
-    ).bind(generateId(), winnerId, loserId, winnerScore, loserScore).run()
+      'INSERT INTO matches (id, winner_id, loser_id, winner_score, loser_score, winner_elo_change, loser_elo_change, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, unixepoch())'
+    ).bind(generateId(), winnerId, loserId, winnerScore, loserScore, winnerEloChange, loserEloChange).run()
   } catch (e) { console.error('Record match error:', e) }
 
   return c.redirect('/')
@@ -406,6 +440,23 @@ app.post('/matches', async (c) => {
 app.post('/matches/:id/delete', async (c) => {
   const id = c.req.param('id')
   try {
+    // Get match data before deleting
+    const match = await c.env.DB.prepare(
+      'SELECT winner_id, loser_id, winner_elo_change, loser_elo_change FROM matches WHERE id = ?'
+    ).bind(id).first()
+
+    if (match) {
+      const winnerEloChange = (match.winner_elo_change as number) || 0
+      const loserEloChange = (match.loser_elo_change as number) || 0
+
+      // Reverse Elo changes
+      await c.env.DB.prepare('UPDATE players SET elo_rating = elo_rating - ? WHERE id = ?')
+        .bind(winnerEloChange, match.winner_id).run()
+      await c.env.DB.prepare('UPDATE players SET elo_rating = elo_rating - ? WHERE id = ?')
+        .bind(loserEloChange, match.loser_id).run()
+    }
+
+    // Delete the match
     await c.env.DB.prepare('DELETE FROM matches WHERE id = ?').bind(id).run()
   } catch (e) { console.error('Delete match error:', e) }
   return c.redirect('/')
