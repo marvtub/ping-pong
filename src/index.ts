@@ -65,6 +65,10 @@ function formatWinRate(player: LeaderboardPlayer): string {
   return player.win_rate == null ? '0%' : `${player.win_rate.toFixed(0)}%`
 }
 
+function formatOgName(name: string): string {
+  return name.length > 24 ? `${name.slice(0, 23)}...` : name
+}
+
 function layout(content: string, origin = '') {
   const imageUrl = `${origin}/og.png`
   return `<!DOCTYPE html>
@@ -394,19 +398,26 @@ async function generateOgSvg(db: D1Database): Promise<string> {
 
   const rows = topThree.length > 0
     ? topThree.map((p, index) => {
-        const y = 240 + index * 105
+        const rowYs = topThree.length === 1
+          ? [330]
+          : topThree.length === 2
+            ? [292, 400]
+            : [252, 350, 448]
+        const y = rowYs[index]
         const rankFill = index === 0 ? '#d97706' : index === 1 ? '#64748b' : '#b45309'
         return `
-          <g>
-            <circle cx="112" cy="${y - 8}" r="30" fill="${rankFill}"/>
-            <text x="112" y="${y + 3}" text-anchor="middle" font-size="28" font-weight="800" fill="#ffffff">${index + 1}</text>
-            <text x="165" y="${y - 18}" font-size="44" font-weight="800" fill="#111827">${escapeHtml(p.name)}</text>
-            <text x="165" y="${y + 28}" font-size="28" font-weight="600" fill="#4b5563">${escapeHtml(formatRecord(p))} · ${escapeHtml(formatWinRate(p))} win rate · ${Math.round(p.elo_rating || 1000)} Elo</text>
+          <g transform="translate(0 ${y})">
+            <rect x="80" y="-46" width="790" height="88" rx="22" fill="#f8fafc" stroke="#e5e7eb" stroke-width="1"/>
+            <circle cx="124" cy="-2" r="29" fill="${rankFill}"/>
+            <text x="124" y="9" text-anchor="middle" font-size="28" font-weight="800" fill="#ffffff">${index + 1}</text>
+            <text x="168" y="-11" font-size="40" font-weight="800" fill="#111827">${escapeHtml(formatOgName(p.name))}</text>
+            <text x="168" y="27" font-size="25" font-weight="600" fill="#4b5563">${escapeHtml(formatRecord(p))} · ${escapeHtml(formatWinRate(p))} win rate · ${Math.round(p.elo_rating || 1000)} Elo</text>
           </g>`
       }).join('')
     : `
-      <text x="80" y="270" font-size="52" font-weight="800" fill="#111827">No ranked players yet</text>
-      <text x="80" y="330" font-size="30" font-weight="600" fill="#4b5563">Players need 3 matches to appear in the top rankings.</text>`
+      <rect x="80" y="244" width="790" height="144" rx="24" fill="#f8fafc" stroke="#e5e7eb" stroke-width="1"/>
+      <text x="122" y="305" font-size="48" font-weight="800" fill="#111827">No ranked players yet</text>
+      <text x="122" y="352" font-size="28" font-weight="600" fill="#4b5563">Players need 3 matches to appear in the top rankings.</text>`
 
   const rankedText = rankedPlayers.length === 1 ? '1 ranked player' : `${rankedPlayers.length} ranked players`
   const playersText = (playerCount?.count || 0) === 1 ? '1 player' : `${playerCount?.count || 0} players`
@@ -417,13 +428,23 @@ async function generateOgSvg(db: D1Database): Promise<string> {
   <desc id="desc">Current top three Lindy Pong players with record, win rate, and Elo.</desc>
   <rect width="1200" height="630" fill="#f8fafc"/>
   <rect x="28" y="28" width="1144" height="574" rx="34" fill="#ffffff" stroke="#e5e7eb" stroke-width="2"/>
-  <circle cx="1020" cy="128" r="96" fill="#dbeafe"/>
-  <circle cx="1070" cy="96" r="42" fill="#2563eb"/>
-  <text x="80" y="118" font-size="30" font-weight="800" fill="#2563eb" letter-spacing="2">LINDY PONG</text>
-  <text x="80" y="178" font-size="58" font-weight="900" fill="#111827">Live Leaderboard</text>
+  <g aria-label="ping pong paddle and ball">
+    <circle cx="1016" cy="132" r="98" fill="#dbeafe"/>
+    <g transform="translate(993 128) rotate(-18)">
+      <rect x="-11" y="52" width="24" height="94" rx="12" fill="#111827"/>
+      <circle cx="0" cy="0" r="68" fill="#2563eb"/>
+      <circle cx="-20" cy="-22" r="20" fill="#3b82f6" opacity="0.7"/>
+      <path d="M-48 40C-18 66 36 60 58 20" fill="none" stroke="#ffffff" stroke-width="10" stroke-linecap="round" opacity="0.75"/>
+    </g>
+    <circle cx="1092" cy="92" r="24" fill="#ffffff" stroke="#d97706" stroke-width="8"/>
+    <path d="M1055 76C1034 63 1016 57 994 57" fill="none" stroke="#93c5fd" stroke-width="8" stroke-linecap="round"/>
+    <path d="M1070 120C1050 133 1028 139 1002 137" fill="none" stroke="#93c5fd" stroke-width="8" stroke-linecap="round"/>
+  </g>
+  <text x="80" y="112" font-size="28" font-weight="800" fill="#2563eb" letter-spacing="2">LINDY PONG</text>
+  <text x="80" y="172" font-size="58" font-weight="900" fill="#111827">Live Leaderboard</text>
   ${rows}
-  <rect x="80" y="535" width="1040" height="1" fill="#e5e7eb"/>
-  <text x="80" y="575" font-size="26" font-weight="700" fill="#4b5563">${escapeHtml(rankedText)} · ${escapeHtml(playersText)} · ${escapeHtml(matchesText)}</text>
+  <rect x="80" y="524" width="1040" height="1" fill="#e5e7eb"/>
+  <text x="80" y="568" font-size="26" font-weight="700" fill="#4b5563">${escapeHtml(rankedText)} · ${escapeHtml(playersText)} · ${escapeHtml(matchesText)}</text>
 </svg>`
 }
 
