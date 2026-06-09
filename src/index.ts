@@ -1,4 +1,6 @@
 import { Hono } from 'hono'
+import { Resvg } from '@cf-wasm/resvg/workerd'
+import ogFont from '../assets/DejaVuSans.ttf'
 
 type Bindings = {
   DB: D1Database
@@ -6,8 +8,27 @@ type Bindings = {
 
 const app = new Hono<{ Bindings: Bindings }>()
 
+type LeaderboardPlayer = {
+  id: string
+  name: string
+  elo_rating: number
+  wins: number
+  losses: number
+  total_games: number
+  win_rate: number | null
+}
+
 function generateId(): string {
   return crypto.randomUUID()
+}
+
+function escapeHtml(value: unknown): string {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
 }
 
 function calculateEloChange(playerRating: number, opponentRating: number, actualScore: number): number {
@@ -16,13 +37,54 @@ function calculateEloChange(playerRating: number, opponentRating: number, actual
   return Math.round(K * (actualScore - expectedScore))
 }
 
-function layout(content: string) {
+function leaderboardQuery(db: D1Database) {
+  return db.prepare(`
+    SELECT p.id, p.name, p.elo_rating,
+      COUNT(DISTINCT CASE WHEN m.winner_id = p.id THEN m.id END) as wins,
+      COUNT(DISTINCT CASE WHEN m.loser_id = p.id THEN m.id END) as losses,
+      (COUNT(DISTINCT CASE WHEN m.winner_id = p.id THEN m.id END) +
+       COUNT(DISTINCT CASE WHEN m.loser_id = p.id THEN m.id END)) as total_games,
+      CAST(COUNT(DISTINCT CASE WHEN m.winner_id = p.id THEN m.id END) AS FLOAT) * 100.0 /
+        NULLIF((COUNT(DISTINCT CASE WHEN m.winner_id = p.id THEN m.id END) +
+                COUNT(DISTINCT CASE WHEN m.loser_id = p.id THEN m.id END)), 0) as win_rate
+    FROM players p
+    LEFT JOIN matches m ON m.winner_id = p.id OR m.loser_id = p.id
+    GROUP BY p.id, p.name, p.elo_rating
+    ORDER BY
+      CASE WHEN (COUNT(DISTINCT CASE WHEN m.winner_id = p.id THEN m.id END) +
+                 COUNT(DISTINCT CASE WHEN m.loser_id = p.id THEN m.id END)) >= 3 THEN 0 ELSE 1 END,
+      p.elo_rating DESC
+  `)
+}
+
+function formatRecord(player: LeaderboardPlayer): string {
+  return `${player.wins}W ${player.losses}L`
+}
+
+function formatWinRate(player: LeaderboardPlayer): string {
+  return player.win_rate == null ? '0%' : `${player.win_rate.toFixed(0)}%`
+}
+
+function layout(content: string, origin = '') {
+  const imageUrl = `${origin}/og.png`
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>🏓 Lindy Pong</title>
+  <title>Lindy Pong Leaderboard</title>
+  <meta name="description" content="Live office ping pong rankings, records, win rates, Elo ratings, and recent matches.">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Lindy Pong Leaderboard">
+  <meta property="og:description" content="See the current Lindy Pong top rankings, records, win rates, and Elo ratings.">
+  <meta property="og:image" content="${escapeHtml(imageUrl)}">
+  <meta property="og:image:type" content="image/png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Lindy Pong Leaderboard">
+  <meta name="twitter:description" content="See the current Lindy Pong top rankings, records, win rates, and Elo ratings.">
+  <meta name="twitter:image" content="${escapeHtml(imageUrl)}">
   <style>
     :root, [data-theme="light"] {
       --bg: #f5f5f5;
@@ -238,11 +300,57 @@ function layout(content: string) {
       id = id || 'match-modal';
       document.getElementById(id).classList.add('show');
       document.body.style.overflow = 'hidden';
+      if (id === 'match-modal') applyRememberedWinner();
     }
     function closeModal(id) {
       id = id || 'match-modal';
       document.getElementById(id).classList.remove('show');
       document.body.style.overflow = '';
+    }
+    function selectFirstDifferent(select, value) {
+      if (!select) return;
+      for (const option of select.options) {
+        if (option.value && option.value !== value) {
+          select.value = option.value;
+          return;
+        }
+      }
+      select.value = '';
+    }
+    function preventDuplicatePlayers(changed) {
+      const winner = document.getElementById('winner-select');
+      const loser = document.getElementById('loser-select');
+      if (!winner || !loser || !winner.value || winner.value !== loser.value) return;
+      if (changed === loser) {
+        selectFirstDifferent(winner, loser.value);
+      } else {
+        selectFirstDifferent(loser, winner.value);
+      }
+    }
+    function applyRememberedWinner() {
+      const winner = document.getElementById('winner-select');
+      if (!winner || winner.value) return;
+      const remembered = localStorage.getItem('lindy-pong:last-winner-id');
+      if (!remembered) return;
+      const option = Array.from(winner.options).find((o) => o.value === remembered);
+      if (!option) return;
+      winner.value = remembered;
+      preventDuplicatePlayers(winner);
+    }
+    function setupMatchMemory() {
+      const form = document.getElementById('match-form');
+      const winner = document.getElementById('winner-select');
+      const loser = document.getElementById('loser-select');
+      if (!form || !winner || !loser) return;
+      winner.addEventListener('change', () => {
+        if (winner.value) localStorage.setItem('lindy-pong:last-winner-id', winner.value);
+        preventDuplicatePlayers(winner);
+      });
+      loser.addEventListener('change', () => preventDuplicatePlayers(loser));
+      form.addEventListener('submit', () => {
+        if (winner.value) localStorage.setItem('lindy-pong:last-winner-id', winner.value);
+      });
+      applyRememberedWinner();
     }
     function timeAgo(timestamp) {
       const now = Math.floor(Date.now() / 1000);
@@ -260,6 +368,7 @@ function layout(content: string) {
         closeModal('match-detail-modal');
       }
     });
+    document.addEventListener('DOMContentLoaded', setupMatchMemory);
   </script>
 </head>
 <body>
@@ -276,28 +385,87 @@ function layout(content: string) {
 </html>`
 }
 
+async function generateOgSvg(db: D1Database): Promise<string> {
+  const leaderboard = await leaderboardQuery(db).all<LeaderboardPlayer>()
+  const playerCount = await db.prepare('SELECT COUNT(*) as count FROM players').first<{ count: number }>()
+  const matchCount = await db.prepare('SELECT COUNT(*) as count FROM matches').first<{ count: number }>()
+  const rankedPlayers = (leaderboard.results || []).filter((p) => p.total_games >= 3)
+  const topThree = rankedPlayers.slice(0, 3)
+
+  const rows = topThree.length > 0
+    ? topThree.map((p, index) => {
+        const y = 240 + index * 105
+        const rankFill = index === 0 ? '#d97706' : index === 1 ? '#64748b' : '#b45309'
+        return `
+          <g>
+            <circle cx="112" cy="${y - 8}" r="30" fill="${rankFill}"/>
+            <text x="112" y="${y + 3}" text-anchor="middle" font-size="28" font-weight="800" fill="#ffffff">${index + 1}</text>
+            <text x="165" y="${y - 18}" font-size="44" font-weight="800" fill="#111827">${escapeHtml(p.name)}</text>
+            <text x="165" y="${y + 28}" font-size="28" font-weight="600" fill="#4b5563">${escapeHtml(formatRecord(p))} · ${escapeHtml(formatWinRate(p))} win rate · ${Math.round(p.elo_rating || 1000)} Elo</text>
+          </g>`
+      }).join('')
+    : `
+      <text x="80" y="270" font-size="52" font-weight="800" fill="#111827">No ranked players yet</text>
+      <text x="80" y="330" font-size="30" font-weight="600" fill="#4b5563">Players need 3 matches to appear in the top rankings.</text>`
+
+  const rankedText = rankedPlayers.length === 1 ? '1 ranked player' : `${rankedPlayers.length} ranked players`
+  const playersText = (playerCount?.count || 0) === 1 ? '1 player' : `${playerCount?.count || 0} players`
+  const matchesText = (matchCount?.count || 0) === 1 ? '1 match recorded' : `${matchCount?.count || 0} matches recorded`
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-labelledby="title desc">
+  <title id="title">Lindy Pong leaderboard top rankings</title>
+  <desc id="desc">Current top three Lindy Pong players with record, win rate, and Elo.</desc>
+  <rect width="1200" height="630" fill="#f8fafc"/>
+  <rect x="28" y="28" width="1144" height="574" rx="34" fill="#ffffff" stroke="#e5e7eb" stroke-width="2"/>
+  <circle cx="1020" cy="128" r="96" fill="#dbeafe"/>
+  <circle cx="1070" cy="96" r="42" fill="#2563eb"/>
+  <text x="80" y="118" font-size="30" font-weight="800" fill="#2563eb" letter-spacing="2">LINDY PONG</text>
+  <text x="80" y="178" font-size="58" font-weight="900" fill="#111827">Live Leaderboard</text>
+  ${rows}
+  <rect x="80" y="535" width="1040" height="1" fill="#e5e7eb"/>
+  <text x="80" y="575" font-size="26" font-weight="700" fill="#4b5563">${escapeHtml(rankedText)} · ${escapeHtml(playersText)} · ${escapeHtml(matchesText)}</text>
+</svg>`
+}
+
+app.get('/og.png', async (c) => {
+  const svg = await generateOgSvg(c.env.DB)
+  const resvg = await Resvg.async(svg, {
+    fitTo: { mode: 'original' },
+    font: {
+      fontBuffers: [new Uint8Array(ogFont)],
+      loadSystemFonts: false,
+      defaultFontFamily: 'DejaVu Sans',
+      sansSerifFamily: 'DejaVu Sans'
+    }
+  })
+  const image = resvg.render()
+
+  try {
+    return c.body(image.asPng(), 200, {
+      'Content-Type': 'image/png',
+      'Cache-Control': 'public, max-age=60'
+    })
+  } finally {
+    image.free()
+    resvg.free()
+  }
+})
+
+app.get('/og.svg', async (c) => {
+  const svg = await generateOgSvg(c.env.DB)
+
+  return c.body(svg, 200, {
+    'Content-Type': 'image/svg+xml; charset=utf-8',
+    'Cache-Control': 'public, max-age=60'
+  })
+})
+
 app.get('/', async (c) => {
   const db = c.env.DB
 
   const players = await db.prepare('SELECT * FROM players ORDER BY name').all()
 
-  const leaderboard = await db.prepare(`
-    SELECT p.id, p.name, p.elo_rating,
-      COUNT(DISTINCT CASE WHEN m.winner_id = p.id THEN m.id END) as wins,
-      COUNT(DISTINCT CASE WHEN m.loser_id = p.id THEN m.id END) as losses,
-      (COUNT(DISTINCT CASE WHEN m.winner_id = p.id THEN m.id END) +
-       COUNT(DISTINCT CASE WHEN m.loser_id = p.id THEN m.id END)) as total_games,
-      CAST(COUNT(DISTINCT CASE WHEN m.winner_id = p.id THEN m.id END) AS FLOAT) * 100.0 /
-        NULLIF((COUNT(DISTINCT CASE WHEN m.winner_id = p.id THEN m.id END) +
-                COUNT(DISTINCT CASE WHEN m.loser_id = p.id THEN m.id END)), 0) as win_rate
-    FROM players p
-    LEFT JOIN matches m ON m.winner_id = p.id OR m.loser_id = p.id
-    GROUP BY p.id, p.name, p.elo_rating
-    ORDER BY
-      CASE WHEN (COUNT(DISTINCT CASE WHEN m.winner_id = p.id THEN m.id END) +
-                 COUNT(DISTINCT CASE WHEN m.loser_id = p.id THEN m.id END)) >= 3 THEN 0 ELSE 1 END,
-      p.elo_rating DESC
-  `).all()
+  const leaderboard = await leaderboardQuery(db).all<LeaderboardPlayer>()
 
   const matches = await db.prepare(`
     SELECT m.id, m.created_at, m.winner_score, m.loser_score,
@@ -311,15 +479,14 @@ app.get('/', async (c) => {
 
   // Player options
   const opts = (players.results || []).map((p: any) =>
-    `<option value="${p.id}">${p.name}</option>`
+    `<option value="${escapeHtml(p.id)}">${escapeHtml(p.name)}</option>`
   ).join('')
 
   // Leaderboard rows
   let lbRows = ''
   let rank = 0
-  for (const p of (leaderboard.results || []) as any[]) {
+  for (const p of (leaderboard.results || []) as LeaderboardPlayer[]) {
     const games = p.total_games as number
-    const wr = p.win_rate as number | null
     const elo = (p.elo_rating as number) || 1000
     const ranked = games >= 3
 
@@ -328,18 +495,18 @@ app.get('/', async (c) => {
       const medal = rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : `${rank}`
       lbRows += `<tr>
         <td class="rank-cell">${medal}</td>
-        <td class="name-cell"><a href="/players/${p.id}" class="name-link">${p.name}</a></td>
-        <td class="record-cell">${p.wins}W ${p.losses}L</td>
+        <td class="name-cell"><a href="/players/${escapeHtml(p.id)}" class="name-link">${escapeHtml(p.name)}</a></td>
+        <td class="record-cell">${escapeHtml(formatRecord(p))}</td>
         <td class="winrate-cell" style="font-weight:700">${Math.round(elo)}</td>
-        <td class="winrate-cell" style="color:var(--muted);font-size:0.8rem">${wr?.toFixed(0)}%</td>
+        <td class="winrate-cell" style="color:var(--muted);font-size:0.8rem">${escapeHtml(formatWinRate(p))}</td>
       </tr>`
     } else {
       lbRows += `<tr class="unranked">
         <td class="rank-cell">–</td>
-        <td class="name-cell"><a href="/players/${p.id}" class="name-link">${p.name}</a></td>
-        <td class="record-cell">${p.wins}W ${p.losses}L</td>
+        <td class="name-cell"><a href="/players/${escapeHtml(p.id)}" class="name-link">${escapeHtml(p.name)}</a></td>
+        <td class="record-cell">${escapeHtml(formatRecord(p))}</td>
         <td class="winrate-cell" style="color:var(--muted)">${Math.round(elo)}</td>
-        <td class="winrate-cell" style="color:var(--muted);font-size:0.8rem">${games > 0 ? wr?.toFixed(0) + '%' : '—'}</td>
+        <td class="winrate-cell" style="color:var(--muted);font-size:0.8rem">${games > 0 ? escapeHtml(formatWinRate(p)) : '—'}</td>
       </tr>`
     }
   }
@@ -359,9 +526,9 @@ app.get('/', async (c) => {
     matchRows += `<div class="match-row" onclick="openModal('match-detail-${m.id}')">
       <div class="match-row-top">
         <div class="match-result">
-          <span class="match-winner">${m.winner_name}</span>
+          <span class="match-winner">${escapeHtml(m.winner_name)}</span>
           <span class="match-vs">beat</span>
-          <span class="match-loser">${m.loser_name}</span>
+          <span class="match-loser">${escapeHtml(m.loser_name)}</span>
           <span class="match-score">${scoreStr}</span>
         </div>
         <span class="match-time"><script>document.write(timeAgo(${m.created_at}))</script></span>
@@ -391,19 +558,19 @@ app.get('/', async (c) => {
         </div>
         <div class="match-detail-content">
           <div class="match-detail-players">
-            <div style="font-weight:700;color:var(--green);margin-bottom:4px">${m.winner_name}</div>
+            <div style="font-weight:700;color:var(--green);margin-bottom:4px">${escapeHtml(m.winner_name)}</div>
             <div style="color:var(--muted);font-size:0.9rem;margin-bottom:4px">beat</div>
-            <div style="font-weight:700;color:var(--red)">${m.loser_name}</div>
+            <div style="font-weight:700;color:var(--red)">${escapeHtml(m.loser_name)}</div>
           </div>
           ${scoreDisplay}
           ${winnerEloChange != null && loserEloChange != null ? `
           <div class="match-detail-elo">
             <div class="match-detail-elo-item">
-              <div class="match-detail-elo-label">${m.winner_name}</div>
+              <div class="match-detail-elo-label">${escapeHtml(m.winner_name)}</div>
               <div class="match-detail-elo-value positive">${winnerEloChange > 0 ? '+' : ''}${winnerEloChange}</div>
             </div>
             <div class="match-detail-elo-item">
-              <div class="match-detail-elo-label">${m.loser_name}</div>
+              <div class="match-detail-elo-label">${escapeHtml(m.loser_name)}</div>
               <div class="match-detail-elo-value negative">${loserEloChange > 0 ? '+' : ''}${loserEloChange}</div>
             </div>
           </div>
@@ -428,15 +595,15 @@ app.get('/', async (c) => {
         </div>
         ${(players.results || []).length < 2
           ? '<p class="empty">Add at least 2 players first.</p>'
-          : `<form method="POST" action="/matches">
+          : `<form id="match-form" method="POST" action="/matches">
               <div class="form-row">
                 <div>
                   <label class="form-label">Winner 🏆</label>
-                  <select name="winner_id" required><option value="">Select...</option>${opts}</select>
+                  <select id="winner-select" name="winner_id" required><option value="">Select...</option>${opts}</select>
                 </div>
                 <div>
                   <label class="form-label">Loser 😔</label>
-                  <select name="loser_id" required><option value="">Select...</option>${opts}</select>
+                  <select id="loser-select" name="loser_id" required><option value="">Select...</option>${opts}</select>
                 </div>
               </div>
               <div class="score-presets">
@@ -504,7 +671,7 @@ app.get('/', async (c) => {
     </div>
   `
 
-  return c.html(layout(content))
+  return c.html(layout(content, new URL(c.req.url).origin))
 })
 
 app.post('/players', async (c) => {
@@ -702,7 +869,7 @@ app.get('/players/:id', async (c) => {
       <div class="match-row-top">
         <div class="match-result">
           <span class="${resultClass}">${resultText}</span>
-          <span style="font-weight:600;margin-left:4px">${opponentName}</span>
+          <span style="font-weight:600;margin-left:4px">${escapeHtml(opponentName)}</span>
           <span class="match-score">${scoreStr}</span>
         </div>
         <span class="match-time"><script>document.write(timeAgo(${m.created_at}))</script></span>
@@ -715,7 +882,7 @@ app.get('/players/:id', async (c) => {
     <a href="/" class="back-link">← Back to Leaderboard</a>
 
     <div class="profile-header">
-      <div class="profile-name">${player.name}</div>
+      <div class="profile-name">${escapeHtml(player.name)}</div>
       <div class="profile-elo">${Math.round((player.elo_rating as number) || 1000)} Elo</div>
       <div class="profile-record">${wins}W - ${losses}L (${winRate}%)</div>
     </div>
@@ -735,7 +902,7 @@ app.get('/players/:id', async (c) => {
     </div>
   `
 
-  return c.html(layout(content))
+  return c.html(layout(content, new URL(c.req.url).origin))
 })
 
 export default app
