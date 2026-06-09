@@ -65,8 +65,19 @@ function formatWinRate(player: LeaderboardPlayer): string {
   return player.win_rate == null ? '0%' : `${player.win_rate.toFixed(0)}%`
 }
 
+function splitGraphemes(value: string): string[] {
+  const Segmenter = (Intl as any).Segmenter
+  if (typeof Segmenter === 'function') {
+    const segmenter = new Segmenter(undefined, { granularity: 'grapheme' })
+    return Array.from(segmenter.segment(value), (part: any) => part.segment)
+  }
+
+  return Array.from(value)
+}
+
 function formatOgName(name: string): string {
-  return name.length > 24 ? `${name.slice(0, 23)}...` : name
+  const graphemes = splitGraphemes(name)
+  return graphemes.length > 24 ? `${graphemes.slice(0, 23).join('')}...` : name
 }
 
 function layout(content: string, origin = '') {
