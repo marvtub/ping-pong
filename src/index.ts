@@ -1,5 +1,6 @@
 import { Hono } from 'hono'
 import { Resvg } from '@cf-wasm/resvg/workerd'
+import ogFont from '../assets/DejaVuSans.ttf'
 
 type Bindings = {
   DB: D1Database
@@ -431,8 +432,10 @@ app.get('/og.png', async (c) => {
   const resvg = await Resvg.async(svg, {
     fitTo: { mode: 'original' },
     font: {
+      fontBuffers: [new Uint8Array(ogFont)],
       loadSystemFonts: false,
-      defaultFontFamily: 'Arial'
+      defaultFontFamily: 'DejaVu Sans',
+      sansSerifFamily: 'DejaVu Sans'
     }
   })
   const image = resvg.render()
