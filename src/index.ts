@@ -1,4 +1,5 @@
 import { Hono } from 'hono'
+import { Resvg } from '@cf-wasm/resvg/workerd'
 
 type Bindings = {
   DB: D1Database
@@ -64,7 +65,7 @@ function formatWinRate(player: LeaderboardPlayer): string {
 }
 
 function layout(content: string, origin = '') {
-  const imageUrl = `${origin}/og.svg`
+  const imageUrl = `${origin}/og.png`
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -76,7 +77,7 @@ function layout(content: string, origin = '') {
   <meta property="og:title" content="Lindy Pong Leaderboard">
   <meta property="og:description" content="See the current Lindy Pong top rankings, records, win rates, and Elo ratings.">
   <meta property="og:image" content="${escapeHtml(imageUrl)}">
-  <meta property="og:image:type" content="image/svg+xml">
+  <meta property="og:image:type" content="image/png">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
   <meta name="twitter:card" content="summary_large_image">
@@ -383,8 +384,7 @@ function layout(content: string, origin = '') {
 </html>`
 }
 
-app.get('/og.svg', async (c) => {
-  const db = c.env.DB
+async function generateOgSvg(db: D1Database): Promise<string> {
   const leaderboard = await leaderboardQuery(db).all<LeaderboardPlayer>()
   const playerCount = await db.prepare('SELECT COUNT(*) as count FROM players').first<{ count: number }>()
   const matchCount = await db.prepare('SELECT COUNT(*) as count FROM matches').first<{ count: number }>()
@@ -411,7 +411,7 @@ app.get('/og.svg', async (c) => {
   const playersText = (playerCount?.count || 0) === 1 ? '1 player' : `${playerCount?.count || 0} players`
   const matchesText = (matchCount?.count || 0) === 1 ? '1 match recorded' : `${matchCount?.count || 0} matches recorded`
 
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-labelledby="title desc">
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-labelledby="title desc">
   <title id="title">Lindy Pong leaderboard top rankings</title>
   <desc id="desc">Current top three Lindy Pong players with record, win rate, and Elo.</desc>
   <rect width="1200" height="630" fill="#f8fafc"/>
@@ -424,6 +424,32 @@ app.get('/og.svg', async (c) => {
   <rect x="80" y="535" width="1040" height="1" fill="#e5e7eb"/>
   <text x="80" y="575" font-size="26" font-weight="700" fill="#4b5563">${escapeHtml(rankedText)} · ${escapeHtml(playersText)} · ${escapeHtml(matchesText)}</text>
 </svg>`
+}
+
+app.get('/og.png', async (c) => {
+  const svg = await generateOgSvg(c.env.DB)
+  const resvg = await Resvg.async(svg, {
+    fitTo: { mode: 'original' },
+    font: {
+      loadSystemFonts: false,
+      defaultFontFamily: 'Arial'
+    }
+  })
+  const image = resvg.render()
+
+  try {
+    return c.body(image.asPng(), 200, {
+      'Content-Type': 'image/png',
+      'Cache-Control': 'public, max-age=60'
+    })
+  } finally {
+    image.free()
+    resvg.free()
+  }
+})
+
+app.get('/og.svg', async (c) => {
+  const svg = await generateOgSvg(c.env.DB)
 
   return c.body(svg, 200, {
     'Content-Type': 'image/svg+xml; charset=utf-8',
