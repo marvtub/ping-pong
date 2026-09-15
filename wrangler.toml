@@ -11,3 +11,8 @@ rules = [
 binding = "DB"
 database_name = "ping-pong-db"
 database_id = "48dd9152-99f1-4290-a646-f0e0ad520223"
+
+# Workers Cache: serve cacheable responses (OG images) from the edge without
+# re-invoking the Worker. Dynamic HTML/POST routes set Cache-Control: no-store.
+[cache]
+enabled = true
