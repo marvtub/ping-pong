@@ -8,6 +8,22 @@ type Bindings = {
 
 const app = new Hono<{ Bindings: Bindings }>()
 
+// OG images are expensive (D1 + Resvg). Long edge TTL + SWR lets Workers Cache
+// serve unfurl/scraper storms without re-invoking the Worker. Slightly stale
+// previews are fine; the live HTML leaderboard stays uncached (no-store).
+const OG_CACHE_CONTROL = 'public, max-age=3600, stale-while-revalidate=86400'
+const OG_PATHS = new Set(['/og.png', '/og.svg'])
+
+app.use('*', async (c, next) => {
+  await next()
+  const path = new URL(c.req.url).pathname
+  if (OG_PATHS.has(path)) return
+  // Required when Workers Cache is enabled: bare 200s otherwise get a 2h heuristic TTL.
+  if (!c.res.headers.has('Cache-Control')) {
+    c.res.headers.set('Cache-Control', 'private, no-store')
+  }
+})
+
 type LeaderboardPlayer = {
   id: string
   name: string
@@ -475,7 +491,9 @@ app.get('/og.png', async (c) => {
   try {
     return c.body(image.asPng(), 200, {
       'Content-Type': 'image/png',
-      'Cache-Control': 'public, max-age=60'
+      'Cache-Control': OG_CACHE_CONTROL,
+      // Enables bulk purge later if match writes should invalidate OG immediately.
+      'Cache-Tag': 'og'
     })
   } finally {
     image.free()
@@ -488,7 +506,8 @@ app.get('/og.svg', async (c) => {
 
   return c.body(svg, 200, {
     'Content-Type': 'image/svg+xml; charset=utf-8',
-    'Cache-Control': 'public, max-age=60'
+    'Cache-Control': OG_CACHE_CONTROL,
+    'Cache-Tag': 'og'
   })
 })
 
